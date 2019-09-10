@@ -1,0 +1,36 @@
+#include <stdio.h>
+#include <sys/socket.h>
+#include <netdb.h>
+#include <string.h>
+#include "cliente.h"
+
+#define BUFFERSIZE 576 //Tamanho maximo da mensagem
+
+void clienteUDP(int porta){
+	struct sockaddr_in servidorUDP,clienteUDP;
+	int tam_clienteUDP, meuSocketUDP;
+	char *envia = retorna_buffer(BUFFERSIZE+1);
+	char *recebe = retorna_buffer(BUFFERSIZE+1);
+
+	meuSocketUDP=socket(PF_INET,SOCK_DGRAM,0); 
+	servidorUDP.sin_family=AF_INET; // familia de endereços
+	servidorUDP.sin_port=htons(porta); // porta
+	// para usar um ip qualquer use inet_addr("10.10.10.10"); ao invés de htonl(INADDR_ANY)
+	servidorUDP.sin_addr.s_addr=htonl(INADDR_ANY);
+
+	bzero(envia, BUFFERSIZE);
+	bzero(recebe, BUFFERSIZE);
+
+	while(1){
+    printf("\n*** Bem vindo ao cliente ***\n");
+    printf("Escreva uma mensagem:\n");   
+    fgets(envia,576,stdin);
+    sendto(meuSocketUDP,envia,strlen(envia),0,(struct sockaddr*)&servidorUDP,sizeof(struct sockaddr_in));
+    tam_cliente=sizeof(struct sockaddr_in);
+    recvfrom(meuSocketUDP,recebe,576,MSG_WAITALL,(struct sockaddr*)&clienteUDP,&tam_clienteUDP);
+    printf("Recebi:%s",recebe);
+    bzero(envia, BUFFERSIZE);
+		bzero(recebe, BUFFERSIZE);
+	}
+  close(meuSocketUDP);
+}

@@ -1,0 +1,42 @@
+#include <stdio.h>
+#include <sys/socket.h>
+#include <netdb.h>
+#include <string.h>
+
+#define BUFFERSIZE 576 //Tamanho maximo da mensagem
+
+
+void servidorUDP(int porta){
+	struct sockaddr_in clienteUDP, servidorUDP;
+	int tam_clienteUDP, meuSocketUDP,enviei=0;
+	char *buffer = retorna_buffer(BUFFERSIZE+1);
+	meuSocketUDP=socket(PF_INET,SOCK_DGRAM,0);
+	servidorUDP.sin_family=AF_INET;
+	servidorUDP.sin_port=htons(porta);
+	servidorUDP.sin_addr.s_addr=htonl(INADDR_ANY);
+
+	//Zerar buffer
+	bzero(buffer, BUFFERSIZE);
+	bind(meuSocketUDP,(struct sockaddr*)&servidorUDP,sizeof(struct sockaddr_in));
+
+	while(1){
+
+		printf("*** Servidor de Mensagens ***\n");
+
+		tam_clienteUDP=sizeof(struct sockaddr_in);
+
+    recvfrom(meuSocketUDP,buffer,576,MSG_WAITALL,(struct sockaddr*)&clienteUDP,&tam_clienteUDP);
+
+    printf("Recebi:%s de <endereço:%s> <porta:%d>\n",buffer,inet_ntoa(clienteUDP.sin_addr),ntohs(clienteUDP.sin_port));
+
+    int enviei=sendto(meuSocketUDP,"ACK!",strlen("ACK!"),0,(struct sockaddr*)&clienteUDP,sizeof(struct sockaddr_in));
+    if (enviei>=0)
+      printf("Envio de ACK!\n");
+    else{
+      error("sendto");
+      printf("Envio de falhou!\n");
+    }
+    esvazia(buffer,576);
+	}
+	close(meuSocketUDP);
+}

@@ -1,0 +1,401 @@
+/*
+Método executador pelo servidor
+*/
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <string.h>
+#include <netdb.h>
+#include "servidor.h"
+#include <sys/time.h>
+
+#define TRUE 1
+#define FALSE 0
+
+struct sockaddr_in 	endereco_servidor, 
+					endereco_cliente;
+
+//Número de clientes no início da execução é 0
+static int numero_clientes = 0;
+
+//Método Main do servidor
+int main(int argc, char *argv[]){
+
+	int numero_registrados = 0;
+
+	//Cria Vetor de usuários
+	user = (Usuario *) malloc(sizeof(Usuario) * MAX_CLIENTES);
+
+	int client_socket[MAX_CLIENTES], i, sd, max_sd, activity, cont;
+	for(i = 0; i < MAX_CLIENTES; i++)
+		client_socket[i] = 0;
+
+	
+  //set of socket descriptors
+  fd_set readfds;
+	
+	//Arquivo de descrição dos sockets
+	int skt_servidor, 
+		skt_cliente;
+	
+	int *portaCliente = (int *) malloc(sizeof(int));
+
+	//Recebe a porta como parametro de entrada, onde ficará esperando conexoes de clientes
+	int DOOR = atoi(argv[1]);
+
+
+	//Buffer (mensagem)
+	char *buffer = retorna_buffer(BUFFERSIZE+1);
+
+	skt_servidor = inicia_socket_tcp();
+	liga_endereco_ao_socket(DOOR, skt_servidor);
+	
+	printf("Servidor localhost aberto\nPorta: %d\n", DOOR);
+
+
+	//Aguarda pedidos de conexão
+	listen(skt_servidor, MAX_CLIENTES);
+	
+	while(1){
+		//clear the socket set
+    FD_ZERO(&readfds);
+    //add master socket to set
+    FD_SET(skt_servidor, &readfds);
+    max_sd = skt_servidor;
+
+		for(i = 0; i < MAX_CLIENTES; i++){
+			//socket descriptor
+    	sd = client_socket[i];         
+    	//if valid socket descriptor then add to read list
+    	if(sd > 0)
+	  	  FD_SET( sd , &readfds);
+
+    	//highest file descriptor number, need it for the select function
+    	if(sd > max_sd)
+	  	  max_sd = sd;
+		}
+
+		//wait for an activity on one of the sockets , timeout is NULL , so wait indefinitely
+    activity = select( max_sd + 1 , &readfds , NULL , NULL , NULL);
+    if (activity < 0)
+            printf("select error");
+
+		if (FD_ISSET(skt_servidor, &readfds)){
+			//Aceita conexão com um cliente
+			skt_cliente = aceita_conexao(skt_servidor, portaCliente);
+
+			client_socket[numero_clientes-1] = skt_cliente;
+
+			do{
+				bzero(buffer, BUFFERSIZE);
+				le_do_socket(skt_cliente, buffer);
+				printf("%s\n", buffer);
+				if (strcmp(buffer, "READY") == 0){
+					printf("Entrou\n");
+					bzero(buffer, BUFFERSIZE);
+					escreve_no_socket(skt_cliente, "READYACK");
+				}
+			}while (strcmp(buffer, "READY"));
+		
+			bzero(buffer, BUFFERSIZE);
+			sprintf(buffer, "%d", *portaCliente);
+			do{
+				escreve_no_socket(skt_cliente, buffer);
+				bzero(buffer, BUFFERSIZE);
+				le_do_socket(skt_cliente, buffer);
+				if(strcmp(buffer, "OK") == 0){
+					escreve_no_socket(skt_cliente, "PORTAACK");
+				}
+			}while (strcmp(buffer, "OK"));
+			bzero(buffer, BUFFERSIZE);
+		}
+		for(cont = 0; cont < numero_clientes; cont++){
+			skt_cliente = client_socket[cont];
+			if (FD_ISSET( skt_cliente , &readfds)){
+				int op = 5;
+				int status = 0;
+				char *ponteiro;
+				bzero(buffer, BUFFERSIZE);
+				le_do_socket(skt_cliente, buffer);
+				if(strcmp(buffer, "") != 0){
+				ponteiro = strtok(buffer, ",\0");
+				op = atoi(ponteiro);
+
+				if (op == 0){
+					/*Enviar a lista de usuarios disponiveis*/
+					ponteiro = strtok(NULL, ",");
+					strcpy(user[numero_clientes-1].apelido, ponteiro);
+					ponteiro = strtok(NULL, ",\0");
+					strcpy(user[numero_clientes-1].ip, ponteiro);
+					ponteiro = strtok(NULL, ",\0");
+					strcpy(user[numero_clientes-1].porta, ponteiro);
+					user[numero_clientes-1].status = status;
+					numero_registrados++;
+					escreve_no_socket(skt_cliente, "INSCACK");
+				}
+
+				if (op == 1){
+					bzero(buffer, BUFFERSIZE);
+					sprintf(buffer, "Usuários conectados: %d\n", numero_registrados);
+					for(i = 0; i < numero_registrados; i++){
+						strcat(buffer, user[i].apelido);
+						strcat(buffer, " - ");
+						if(user[i].status == 0){
+							strcat(buffer, "Conectado\n");
+						}
+						if(user[i].status == 1){
+							strcat(buffer, "Disponivel\n");
+						}
+						if(user[i].status == 2){
+							strcat(buffer, "Conversando\n");
+						}
+					}
+					escreve_no_socket(skt_cliente, buffer);
+					do{
+						bzero(buffer, BUFFERSIZE);
+						le_do_socket(skt_cliente, buffer);
+						if (strcmp(buffer, "OK") == 0)
+							escreve_no_socket(skt_cliente, "LISTACK");
+					}while (strcmp(buffer, "OK"));
+					bzero(buffer, BUFFERSIZE);
+				}
+
+				if (op == 2){	
+					ponteiro = strtok(NULL, ",");
+					int ind = -1;
+					for(i = 0; i < numero_registrados; i++){
+						if(strcmp(user[i].apelido, ponteiro) == 0){
+							ind = i;
+						}
+					}
+					if(ind >= 0){
+						ponteiro = strtok(NULL, ",\0");
+						user[ind].status = atoi(ponteiro);
+						printf("Status setado %d\n", user[ind].status);
+
+						escreve_no_socket(skt_cliente, "STATACK");
+					}else{
+						printf("Usuario invalido\n");
+					}
+				}
+				if (op == 3){
+					ponteiro = strtok(NULL, ",");
+					int ind = -1;
+					for(i = 0; i < numero_registrados; i++){
+						if(strcmp(user[i].apelido, ponteiro) == 0){
+							ind = i;
+						}
+					}
+					if(ind >= 0){
+						bzero(buffer, BUFFERSIZE);
+						strcpy(buffer, user[ind].ip);
+						strcat(buffer, ",");
+						strcat(buffer, user[ind].porta);
+						escreve_no_socket(skt_cliente, buffer);
+					}
+					do{
+						bzero(buffer, BUFFERSIZE);
+						le_do_socket(skt_cliente, buffer);
+						if (strcmp(buffer, "OK") == 0)
+							escreve_no_socket(skt_cliente, "RECACK");
+					}while (strcmp(buffer, "OK"));
+					bzero(buffer, BUFFERSIZE);
+				}
+
+				if (op == 4){
+					ponteiro = strtok(NULL, ",");
+					int ind = -1;
+					for(i = 0; i < numero_registrados; i++){
+						if(strcmp(user[i].apelido, ponteiro) == 0){
+							ind = i;
+						}
+					}
+					if(ind >= 0){
+						strcpy(user[ind].apelido, " ");
+						strcpy(user[ind].ip, " ");
+						strcpy(user[ind].porta, " ");
+						user[ind].status = -1;
+						for(i = ind; i < numero_registrados-1; i++){
+							strcpy(user[i].apelido, user[i+1].apelido);
+							strcpy(user[i].ip, user[i+1].ip);
+							strcpy(user[i].porta, user[i+1].porta);
+							user[i].status = user[i+1].status;
+						}
+						numero_registrados--;
+						escreve_no_socket(skt_cliente, "DESACK");
+
+						numero_clientes--;
+					}
+				}else{
+						cont = numero_clientes;
+				}
+			}
+			} //if teve alteração 
+
+		} //FOR percorre socktes
+		
+	} //WHILE TRUE
+
+	zera_endereco();
+	free(buffer);
+	free(portaCliente);
+	free(user);
+	return 0;
+}
+
+/*
+Inicia socket no protocolo TCP.
+Caso não haja erro, retorna um número que representa o arquivo de descrição 
+do Socket aberto. Caso ocorre algum erro retorna um número negativo.
+*/
+int inicia_socket_tcp(){
+	int opt = TRUE;
+	int skt;
+	#ifdef DEBUG
+		printf("Abrindo o socket...\n");
+	#endif
+	skt = socket(AFFAMILY, SOCK_STREAM, IPPROTO_TCP); //Protocolo: TCP
+
+	if (skt < 0){
+
+		mensagem_erro("Erro ao abrir o socket");
+	}
+
+	//set master socket to allow multiple connections , this is just a good habit, it will work without this
+  if(setsockopt(skt, SOL_SOCKET, SO_REUSEADDR, (char *)&opt, sizeof(opt)) < 0 )
+    {
+        perror("setsockopt");
+        exit(EXIT_FAILURE);
+    }
+
+	#ifdef DEBUG
+		printf("Socket %d aberto...\n", skt);
+	#endif
+
+	return skt;
+}
+
+void liga_endereco_ao_socket(int porta, int skt){
+
+	//Zera a região de memória do endereco do servidor
+	zera_endereco();
+
+	//Configura a familia do socket
+	endereco_servidor.sin_family = AF_INET; // AFFAMILY;
+
+	//Aceita todos endereços
+	endereco_servidor.sin_addr.s_addr = INADDR_ANY;
+
+	#ifdef DEBUG
+		printf("Ligando o endereco a porta %d...\n", porta);
+	#endif
+	//Configura a porta. htons = Host to Network Short (de int para short)
+	endereco_servidor.sin_port = htons(porta);
+
+	#ifdef DEBUG
+		printf("Realizando o bind entre o socket %d e o endereco servidor...\n", skt);
+	#endif	
+	//Realiza o bind
+	int b = bind(skt, (struct sockaddr *) &endereco_servidor, 
+		sizeof(endereco_servidor));
+
+	if (b < 0){
+
+		mensagem_erro("Erro ao realizaro BIND");
+	}
+}
+
+int aceita_conexao(int skt_servidor, int *portaCliente){
+
+	int tamanho_cliente,
+		novo_skt_cliente;
+
+	tamanho_cliente = sizeof(endereco_cliente);
+
+	#ifdef DEBUG
+		printf("Disponivel para conexao do proximo socket da fila...\n");
+	#endif
+	novo_skt_cliente = accept(skt_servidor, (struct sockaddr *)&endereco_cliente, &tamanho_cliente);
+
+	if (novo_skt_cliente < 0){
+
+		#ifdef DEBUG
+			printf("Obteve valor invalido de socket: %d...\n", 
+				novo_skt_cliente);
+		#endif
+		mensagem_erro("Erro ao aceitar a conexao");
+	}else{
+		numero_clientes++;
+		*portaCliente = ntohs(endereco_cliente.sin_port);
+		#ifdef DEBUG
+			printf("Conexao feita com o socket %d...\nNumero de clientes ligados: %d\n", 
+				    novo_skt_cliente, numero_clientes);
+		#endif
+	}
+
+	return novo_skt_cliente;
+}
+
+void zera_endereco(){
+
+	#ifdef DEBUG
+		printf("Zerando o endereco do socket...\n");
+	#endif
+	//Zera a região de memória do endereco do servidor
+	bzero((char*) &endereco_servidor, sizeof(endereco_servidor));
+}
+
+void le_do_socket(int skt, char * buffer){
+
+	#ifdef DEBUG
+		printf("Lendo do socket %d...\n", skt);
+	#endif
+	if (read(skt, buffer, BUFFERSIZE-1) < 0){
+
+		mensagem_erro("Erro ao ler do socket");
+	}
+}
+
+void escreve_no_socket(int skt, char * mensagem){
+
+	#ifdef DEBUG
+		printf("Escrevendo no socket %d...\n", skt);
+	#endif
+	if (write(skt, mensagem, strlen(mensagem)) < 0){
+
+		mensagem_erro("Erro ao escrever no socket");
+	}
+}
+
+void verifica_numero_argumentos(int argc){
+
+	if (argc < 2){
+
+		fprintf(stderr, "Erro, porta nao foi fornecida\n");
+		exit(1);
+	}
+}
+
+void mensagem_erro(char * mensagem){
+
+	perror(mensagem);
+	exit(1);
+}
+
+char * retorna_buffer(int tamanho){
+
+	char * buffer;
+	buffer = malloc(tamanho*sizeof(char));
+
+	return buffer;
+}
+
+void imprime_mensagem(char * buffer){
+
+	printf("%s\n", buffer);
+}
+
